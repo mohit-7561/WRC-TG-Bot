@@ -60,7 +60,7 @@ SERVER_DOWN_MESSAGE = """
 • Technical Team Working on Fix
 • Will be Back Soon with Better Features
 
-⏰ *Estimated Recovery Time:* 2\-3 Hours
+⏰ *Estimated Recovery Time:* 2-3 Hours
 
 🔔 *Stay Connected:*
 • Keep Notifications ON
@@ -68,9 +68,9 @@ SERVER_DOWN_MESSAGE = """
 • Premium Users Will Get Priority Access
 
 📞 *For Urgent Queries:*
-Contact: @mohit666r \| @dexter09011
+Contact: @mohit666r | @dexter09011
 
-🙏 Thank you for your patience\! 🙏
+🙏 Thank you for your patience! 🙏
 """
 
 SERVER_UPDATE_MESSAGE = """
@@ -83,23 +83,23 @@ SERVER_UPDATE_MESSAGE = """
 • Adding Better Protection
 • Implementing New Requests
 
-⏰ *Update Duration:* 3\-4 Hours
+⏰ *Update Duration:* 3-4 Hours
 
 ✨ *What's Coming:*
 • New ESP Features
 • Enhanced Aimbot
-• Better Anti\-Ban
+• Better Anti-Ban
 • More Premium Features
 
 🔔 *Stay Tuned:*
 • Major Improvements Coming
 • Premium Users Get First Access
-• New Version Will Be Worth the Wait\!
+• New Version Will Be Worth the Wait!
 
 📞 *For Updates:*
-Contact: @mohit666r \| @dexter09011
+Contact: @mohit666r | @dexter09011
 
-💫 Get Ready for Something Amazing\! 💫
+💫 Get Ready for Something Amazing! 💫
 """
 
 SERVER_MAINTENANCE_MESSAGE = """
@@ -112,7 +112,7 @@ SERVER_MAINTENANCE_MESSAGE = """
 • System Improvements
 • Bug Fixes in Progress
 
-⏰ *Maintenance Duration:* 1\-2 Hours
+⏰ *Maintenance Duration:* 1-2 Hours
 
 📋 *What We're Doing:*
 • Enhancing Mod Stability
@@ -126,14 +126,14 @@ SERVER_MAINTENANCE_MESSAGE = """
 • All Services Will Be Enhanced
 
 📞 *Need Help?*
-Contact: @mohit666r \| @dexter09011
+Contact: @mohit666r | @dexter09011
 
-🌟 Thank You for Your Understanding\! 🌟
+🌟 Thank You for Your Understanding! 🌟
 """
 
 # Add server status messages
 SERVER_FIXED_MESSAGE = """
-✅ *BGMI MODS SERVER IS BACK ONLINE\!* ✅
+✅ *BGMI MODS SERVER IS BACK ONLINE!* ✅
 
 🎮 *SERVER STATUS: OPERATIONAL* 🎮
 
@@ -143,8 +143,8 @@ SERVER_FIXED_MESSAGE = """
 • Better Performance & Stability
 
 🚀 *What's Working:*
-• ESP Hacks \- Full Access
-• Aimbot Features \- Enhanced
+• ESP Hacks - Full Access
+• Aimbot Features - Enhanced
 • All Premium Features
 • Instant Downloads
 
@@ -156,13 +156,13 @@ SERVER_FIXED_MESSAGE = """
 
 📥 *Start Downloading:*
 • All Latest Mods Available
-• Updated Anti\-Ban System
+• Updated Anti-Ban System
 • Improved Stability
 
 📞 *Need Premium Access?*
-Contact: @mohit666r \| @dexter09011
+Contact: @mohit666r | @dexter09011
 
-🎯 *Time to Dominate BGMI Again\!* 🏆
+🎯 *Time to Dominate BGMI Again!* 🏆
 """
 
 ANTICHEAT_MESSAGE = """
