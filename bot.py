@@ -1042,16 +1042,23 @@ async def send_random_joke(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a random BGMI joke to the channel."""
     try:
         chat_id = str(context.job.data).strip()
+        # Add more detailed logging
+        logger.info(f"Joke scheduler triggered. Job ID: {context.job.id}, Name: {getattr(context.job, 'name', 'unnamed')}")
         logger.info(f"Attempting to send joke to chat ID: {chat_id}")
         
         # Get a random joke from the imported BGMI_JOKES
         joke = random.choice(BGMI_JOKES)
+        
+        # Add a simple de-duplication mechanism with a timestamp
+        timestamp = datetime.now().strftime("%d-%b %H:%M")
+        joke_with_timestamp = f"{joke}\n\n[{timestamp}]"
+        
         result = await context.bot.send_message(
             chat_id=chat_id,
-            text=joke,
+            text=joke_with_timestamp,
             parse_mode='Markdown'
         )
-        logger.info(f"Joke sent successfully to chat ID: {chat_id}")
+        logger.info(f"Joke sent successfully to chat ID: {chat_id} at {timestamp}")
     except Exception as e:
         logger.error(f"Error sending joke: {str(e)}")
         logger.error(f"Chat ID being used: {chat_id}")
@@ -1295,11 +1302,20 @@ def main() -> None:
 
     # Schedule jokes every 5 hours
     five_hours_in_seconds = 5 * 60 * 60  # 5 hours in seconds
-    application.job_queue.run_repeating(
+    
+    # Remove any existing joke schedulers first (to prevent duplicates)
+    for job in application.job_queue.jobs():
+        if hasattr(job, 'name') and job.name == 'joke_scheduler':
+            job.schedule_removal()
+            logger.info("Removed existing joke scheduler")
+    
+    # Add new joke scheduler with a name
+    joke_job = application.job_queue.run_repeating(
         send_random_joke,
         interval=five_hours_in_seconds,
         first=300,  # First joke after 5 minutes
-        data=chat_id
+        data=chat_id,
+        name='joke_scheduler'  # Add a name to identify this job
     )
     logger.info(f"Joke scheduler started for chat ID: {chat_id}")
 
