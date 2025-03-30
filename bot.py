@@ -300,16 +300,9 @@ AUTHORIZED_USERS = set()  # Start with empty set
 # Store scheduled announcements
 SCHEDULED_ANNOUNCEMENTS = {}
 
-# Add this at the top with other global variables
-LAST_JOKE_TIME = None
-
-# Add these new constants at the top with other globals
-JOKE_STATE_FILE = "joke_state.json"
-LOCK_FILE = "joke.lock"
-
-# Add a global lock to ensure only one joke is sent at a time
-JOKE_LOCK = threading.Lock()
-SENDING_JOKE = False
+# Replace all global joke timing variables with just a single instance tracking variable
+ACTIVE_JOKE_INSTANCE = False
+SCHEDULED_JOKE_JOBS = []
 
 async def check_permission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Check if user has permission to use commands."""
@@ -1054,37 +1047,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def send_random_joke(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a random BGMI joke to the channel."""
-    global SENDING_JOKE
+    global ACTIVE_JOKE_INSTANCE
     
-    # Use a global flag to prevent multiple joke sends
-    if SENDING_JOKE:
-        logger.warning("Already sending a joke, skipping this execution")
+    # If another instance is already active, skip this execution
+    if ACTIVE_JOKE_INSTANCE:
+        logger.warning("Another instance is already sending a joke - skipping this execution")
         return
         
-    # Set the flag to prevent other instances from sending
-    SENDING_JOKE = True
+    # Set flag to indicate we're the active instance
+    ACTIVE_JOKE_INSTANCE = True
     
     try:
-        # Load last joke time from file
-        now = datetime.now()
-        state_path = pathlib.Path(JOKE_STATE_FILE)
-        
-        if state_path.exists():
-            try:
-                with open(JOKE_STATE_FILE, 'r') as f:
-                    state = json.load(f)
-                    last_joke_time = datetime.fromtimestamp(state.get('last_joke_time', 0))
-                    
-                # Check if enough time has passed (5 hours = 18000 seconds)
-                if (now - last_joke_time).total_seconds() < 18000:
-                    time_to_next = ((last_joke_time.timestamp() + 18000) - now.timestamp()) / 3600
-                    logger.warning(f"Not enough time passed since last joke at {last_joke_time.strftime('%H:%M:%S')}. Next joke in {time_to_next:.1f} hours")
-                    SENDING_JOKE = False
-                    return
-            except Exception as e:
-                logger.error(f"Error reading joke state file: {e}")
-                # Continue anyway to ensure jokes are sent
-        
+        # Get chat ID from job data
         chat_id = str(context.job.data).strip()
         logger.info(f"Sending joke to chat ID: {chat_id}")
         
@@ -1092,37 +1066,47 @@ async def send_random_joke(context: ContextTypes.DEFAULT_TYPE) -> None:
         joke = random.choice(BGMI_JOKES)
         
         # Send the joke
-        result = await context.bot.send_message(
+        await context.bot.send_message(
             chat_id=chat_id,
             text=joke,
             parse_mode='Markdown'
         )
         
-        # Only update state file if message was sent successfully
-        if result:
-            # Save the joke state
-            try:
-                with open(JOKE_STATE_FILE, 'w') as f:
-                    json.dump({
-                        'last_joke_time': now.timestamp(),
-                        'last_joke_id': str(result.message_id)
-                    }, f)
-                logger.info(f"Joke sent successfully at {now.strftime('%d-%b %H:%M')}. Next joke in 5 hours.")
-            except Exception as e:
-                logger.error(f"Error saving joke state: {e}")
+        logger.info(f"Joke sent successfully at {datetime.now().strftime('%d-%b %H:%M')}. Next joke will be in 5 hours.")
+        
+        # Schedule next joke exactly 5 hours from now, and cancel current job
+        # This ensures we never get duplicate joke schedules
+        if hasattr(context, 'job_queue'):
+            # Schedule next job in 5 hours
+            next_job = context.job_queue.run_once(
+                send_random_joke,
+                when=timedelta(hours=5),
+                data=chat_id,
+                name='joke_scheduler'
+            )
+            
+            # Add to our tracking list
+            global SCHEDULED_JOKE_JOBS
+            SCHEDULED_JOKE_JOBS.append(next_job)
+            
+            # Remove current job from scheduler to prevent duplicate runs
+            if hasattr(context.job, 'job') and hasattr(context.job.job, 'schedule_removal'):
+                context.job.job.schedule_removal()
+            
+            logger.info(f"Scheduled next joke for {(datetime.now() + timedelta(hours=5)).strftime('%d-%b %H:%M')}")
         
     except Exception as e:
         logger.error(f"Error sending joke: {str(e)}")
     finally:
-        # Always reset the flag
-        SENDING_JOKE = False
+        # Reset flag so future jokes can be sent
+        ACTIVE_JOKE_INSTANCE = False
 
 def get_welcome_by_gender(name, username):
     """Get gender-specific welcome message."""
     # Simplified version that doesn't use NameDataset
     # Always use the default male message to save memory
     return (
-        f"🎮 *Arre @{username} Bhai!*\n\n"
+        f"🎮 *नमस्ते {name}!*\n\n"
         "🔥 *BGMI के सबसे बड़े Mods Channel में आपका स्वागत है!*\n\n"
         "अब आप बनोगे BGMI के Boss! 👑\n"
         "Ready ho jao Lobby में आग लगाने के लिए! 🚀\n\n"
@@ -1139,11 +1123,11 @@ async def handle_member_update(update: Update, context: ContextTypes.DEFAULT_TYP
         new_member = update.chat_member.new_chat_member.user
         chat_id = update.chat_member.chat.id
         
-        # Get the member's username and first name
-        username = new_member.username or new_member.first_name
+        # Get the member's first name
         first_name = new_member.first_name
+        username = new_member.username or first_name  # Keep username as backup but don't show it
         
-        # Create gender-specific welcome message
+        # Create welcome message using first name
         welcome_message = get_welcome_by_gender(first_name, username)
         
         # Send welcome message and channel info
@@ -1354,23 +1338,24 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("Added message handlers")
 
-    # Schedule jokes every 5 hours exactly
-    five_hours_in_seconds = 5 * 60 * 60  # 5 hours in seconds
+    # First, cancel any existing joke jobs
+    for job in application.job_queue.jobs():
+        if hasattr(job, 'name') and 'joke' in job.name.lower():
+            job.schedule_removal()
+            logger.info(f"Removed existing joke job: {job.name}")
     
-    # Remove any existing lock file at startup
-    lock_path = pathlib.Path(LOCK_FILE)
-    if lock_path.exists():
-        lock_path.unlink()
-        logger.info("Removed stale lock file at startup")
-    
-    application.job_queue.run_repeating(
+    # Schedule first joke after 5 minutes
+    job = application.job_queue.run_once(
         send_random_joke,
-        interval=five_hours_in_seconds,
-        first=300,  # First joke after 5 minutes
+        when=timedelta(minutes=5),
         data=chat_id,
-        name='joke_scheduler'
+        name='initial_joke_scheduler'
     )
-    logger.info(f"Joke scheduler started for chat ID: {chat_id} - will send a joke every 5 hours")
+    
+    # Add to our tracking list
+    SCHEDULED_JOKE_JOBS.append(job)
+    
+    logger.info(f"Initial joke scheduled for {(datetime.now() + timedelta(minutes=5)).strftime('%H:%M')}. After that, jokes will be sent every 5 hours.")
 
     # Start the bot
     logger.info(f"Starting bot @{BOT_USERNAME}")
