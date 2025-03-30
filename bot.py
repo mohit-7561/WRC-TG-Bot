@@ -963,7 +963,7 @@ async def server_maintenance(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=SERVER_MAINTENANCE_MESSAGE,
-                parse_mode='MarkdownV2'
+                parse_mode='Markdown'
             )
             logger.info(f"Server maintenance message sent to channel by @{user.username}")
             
@@ -1011,7 +1011,7 @@ async def server_fixed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=SERVER_FIXED_MESSAGE,
-                parse_mode='MarkdownV2'
+                parse_mode='Markdown'
             )
             logger.info(f"Server fixed message sent to channel by @{user.username}")
             
