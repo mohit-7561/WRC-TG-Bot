@@ -297,6 +297,9 @@ AUTHORIZED_USERS = set()  # Start with empty set
 # Store scheduled announcements
 SCHEDULED_ANNOUNCEMENTS = {}
 
+# Add this at the top with other global variables
+LAST_JOKE_TIME = None
+
 async def check_permission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Check if user has permission to use commands."""
     try:
@@ -1040,28 +1043,39 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def send_random_joke(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a random BGMI joke to the channel."""
+    global LAST_JOKE_TIME
+    
     try:
+        # Get current time
+        now = datetime.now()
+        
+        # Check if we've sent a joke recently (within the scheduled interval)
+        # 5 hours minus 30 minutes buffer = 4.5 hours or 16200 seconds
+        if LAST_JOKE_TIME and (now - LAST_JOKE_TIME).total_seconds() < 16200:  # 4.5 hours
+            logger.warning(f"Skipping joke - last joke was sent at {LAST_JOKE_TIME.strftime('%H:%M:%S')}, next scheduled in {((LAST_JOKE_TIME.timestamp() + 18000) - now.timestamp()) / 60:.1f} minutes")
+            return
+        
         chat_id = str(context.job.data).strip()
-        # Add more detailed logging
-        logger.info(f"Joke scheduler triggered. Job ID: {context.job.id}, Name: {getattr(context.job, 'name', 'unnamed')}")
-        logger.info(f"Attempting to send joke to chat ID: {chat_id}")
+        logger.info(f"Sending joke to chat ID: {chat_id}")
         
         # Get a random joke from the imported BGMI_JOKES
         joke = random.choice(BGMI_JOKES)
         
-        # Add a simple de-duplication mechanism with a timestamp
-        timestamp = datetime.now().strftime("%d-%b %H:%M")
-        joke_with_timestamp = f"{joke}\n\n[{timestamp}]"
-        
-        result = await context.bot.send_message(
+        # Send the joke
+        await context.bot.send_message(
             chat_id=chat_id,
-            text=joke_with_timestamp,
+            text=joke,
             parse_mode='Markdown'
         )
-        logger.info(f"Joke sent successfully to chat ID: {chat_id} at {timestamp}")
+        
+        # Update the last joke time
+        LAST_JOKE_TIME = now
+        logger.info(f"Joke sent successfully at {now.strftime('%d-%b %H:%M')}. Next joke scheduled in 5 hours.")
+        
     except Exception as e:
         logger.error(f"Error sending joke: {str(e)}")
-        logger.error(f"Chat ID being used: {chat_id}")
+        if 'chat_id' in locals():
+            logger.error(f"Chat ID being used: {chat_id}")
 
 def get_welcome_by_gender(name, username):
     """Get gender-specific welcome message."""
@@ -1300,24 +1314,16 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("Added message handlers")
 
-    # Schedule jokes every 5 hours
+    # Schedule jokes every 5 hours exactly
     five_hours_in_seconds = 5 * 60 * 60  # 5 hours in seconds
-    
-    # Remove any existing joke schedulers first (to prevent duplicates)
-    for job in application.job_queue.jobs():
-        if hasattr(job, 'name') and job.name == 'joke_scheduler':
-            job.schedule_removal()
-            logger.info("Removed existing joke scheduler")
-    
-    # Add new joke scheduler with a name
-    joke_job = application.job_queue.run_repeating(
+    application.job_queue.run_repeating(
         send_random_joke,
         interval=five_hours_in_seconds,
         first=300,  # First joke after 5 minutes
         data=chat_id,
-        name='joke_scheduler'  # Add a name to identify this job
+        name='joke_scheduler'
     )
-    logger.info(f"Joke scheduler started for chat ID: {chat_id}")
+    logger.info(f"Joke scheduler started for chat ID: {chat_id} - will send a joke every 5 hours")
 
     # Start the bot
     logger.info(f"Starting bot @{BOT_USERNAME}")
