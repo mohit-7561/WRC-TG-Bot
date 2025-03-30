@@ -7,6 +7,8 @@ from telegram.ext import Application, ContextTypes, ChatMemberHandler, JobQueue,
 # from names_dataset import NameDataset  # Comment out to save memory
 from jokes import BGMI_JOKES  # Import jokes from jokes.py
 from datetime import datetime, timedelta
+import json
+import pathlib
 
 # Load environment variables
 load_dotenv()
@@ -299,6 +301,10 @@ SCHEDULED_ANNOUNCEMENTS = {}
 
 # Add this at the top with other global variables
 LAST_JOKE_TIME = None
+
+# Add these new constants at the top with other globals
+JOKE_STATE_FILE = "joke_state.json"
+LOCK_FILE = "joke.lock"
 
 async def check_permission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Check if user has permission to use commands."""
@@ -1043,39 +1049,71 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def send_random_joke(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a random BGMI joke to the channel."""
-    global LAST_JOKE_TIME
-    
     try:
-        # Get current time
-        now = datetime.now()
+        # Check lock file
+        lock_path = pathlib.Path(LOCK_FILE)
+        if lock_path.exists():
+            # Check if lock is stale (older than 5 minutes)
+            if (datetime.now().timestamp() - lock_path.stat().st_mtime) < 300:
+                logger.warning("Another instance is currently sending a joke. Skipping.")
+                return
         
-        # Check if we've sent a joke recently (within the scheduled interval)
-        # 5 hours minus 30 minutes buffer = 4.5 hours or 16200 seconds
-        if LAST_JOKE_TIME and (now - LAST_JOKE_TIME).total_seconds() < 16200:  # 4.5 hours
-            logger.warning(f"Skipping joke - last joke was sent at {LAST_JOKE_TIME.strftime('%H:%M:%S')}, next scheduled in {((LAST_JOKE_TIME.timestamp() + 18000) - now.timestamp()) / 60:.1f} minutes")
-            return
+        # Create lock file
+        lock_path.touch()
         
-        chat_id = str(context.job.data).strip()
-        logger.info(f"Sending joke to chat ID: {chat_id}")
-        
-        # Get a random joke from the imported BGMI_JOKES
-        joke = random.choice(BGMI_JOKES)
-        
-        # Send the joke
-        await context.bot.send_message(
-            chat_id=chat_id,
-            text=joke,
-            parse_mode='Markdown'
-        )
-        
-        # Update the last joke time
-        LAST_JOKE_TIME = now
-        logger.info(f"Joke sent successfully at {now.strftime('%d-%b %H:%M')}. Next joke scheduled in 5 hours.")
+        try:
+            # Load last joke time from file
+            state_path = pathlib.Path(JOKE_STATE_FILE)
+            if state_path.exists():
+                with open(JOKE_STATE_FILE, 'r') as f:
+                    state = json.load(f)
+                    last_joke_time = datetime.fromtimestamp(state.get('last_joke_time', 0))
+            else:
+                last_joke_time = None
+            
+            # Get current time
+            now = datetime.now()
+            
+            # Check if enough time has passed (5 hours = 18000 seconds)
+            if last_joke_time and (now - last_joke_time).total_seconds() < 18000:
+                logger.warning(f"Not enough time passed since last joke at {last_joke_time.strftime('%H:%M:%S')}. Next joke in {((last_joke_time.timestamp() + 18000) - now.timestamp()) / 3600:.1f} hours")
+                return
+            
+            chat_id = str(context.job.data).strip()
+            logger.info(f"Sending joke to chat ID: {chat_id}")
+            
+            # Get a random joke from the imported BGMI_JOKES
+            joke = random.choice(BGMI_JOKES)
+            
+            # Send the joke
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=joke,
+                parse_mode='Markdown'
+            )
+            
+            # Update state file
+            with open(JOKE_STATE_FILE, 'w') as f:
+                json.dump({
+                    'last_joke_time': now.timestamp(),
+                    'last_joke_text': joke[:100]  # Store first 100 chars for logging
+                }, f)
+            
+            logger.info(f"Joke sent successfully at {now.strftime('%d-%b %H:%M')}. Next joke in 5 hours.")
+            
+        finally:
+            # Always remove lock file
+            if lock_path.exists():
+                lock_path.unlink()
         
     except Exception as e:
         logger.error(f"Error sending joke: {str(e)}")
-        if 'chat_id' in locals():
-            logger.error(f"Chat ID being used: {chat_id}")
+        # Try to remove lock file in case of error
+        try:
+            if lock_path.exists():
+                lock_path.unlink()
+        except:
+            pass
 
 def get_welcome_by_gender(name, username):
     """Get gender-specific welcome message."""
@@ -1316,6 +1354,13 @@ def main() -> None:
 
     # Schedule jokes every 5 hours exactly
     five_hours_in_seconds = 5 * 60 * 60  # 5 hours in seconds
+    
+    # Remove any existing lock file at startup
+    lock_path = pathlib.Path(LOCK_FILE)
+    if lock_path.exists():
+        lock_path.unlink()
+        logger.info("Removed stale lock file at startup")
+    
     application.job_queue.run_repeating(
         send_random_joke,
         interval=five_hours_in_seconds,
