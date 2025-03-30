@@ -4,15 +4,12 @@ import random
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, ContextTypes, ChatMemberHandler, JobQueue, MessageHandler, filters, CommandHandler
-from names_dataset import NameDataset
+# from names_dataset import NameDataset  # Comment out to save memory
 from jokes import BGMI_JOKES  # Import jokes from jokes.py
 from datetime import datetime, timedelta
 
 # Load environment variables
 load_dotenv()
-
-# Initialize name dataset
-nd = NameDataset()
 
 # Initialize logging with more detail
 logging.basicConfig(
@@ -21,6 +18,9 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger(__name__)
+
+# Don't load NameDataset globally - will load only when needed
+# nd = NameDataset()
 
 # Channel welcome message
 CHANNEL_INFO = """
@@ -1056,27 +1056,10 @@ async def send_random_joke(context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Error sending joke: {str(e)}")
         logger.error(f"Chat ID being used: {chat_id}")
 
-def get_welcome_by_gender(name: str, username: str) -> str:
+def get_welcome_by_gender(name, username):
     """Get gender-specific welcome message."""
-    # Try to detect gender from first name
-    first_name = name.split()[0]
-    
-    try:
-        # Check if name exists in female names dataset
-        if nd.search(first_name)['first_name'].get('gender', '') == 'F':
-            return (
-                f"🎮 *Arre @{username} Behena!*\n\n"
-                "🔥 *BGMI की Queen, हमारे Mods Channel में आपका स्वागत है!*\n\n"
-                "अब आप बनोगी BGMI की Boss Lady! 👑\n"
-                "Ready ho jao Lobby में तहलका मचाने के लिए! 🚀\n\n"
-                "🔐 *Premium Key के लिए संपर्क करें:*\n"
-                "• @mohit666r\n"
-                "• @dexter09011"
-            )
-    except:
-        pass
-    
-    # Default to male message
+    # Simplified version that doesn't use NameDataset
+    # Always use the default male message to save memory
     return (
         f"🎮 *Arre @{username} Bhai!*\n\n"
         "🔥 *BGMI के सबसे बड़े Mods Channel में आपका स्वागत है!*\n\n"
