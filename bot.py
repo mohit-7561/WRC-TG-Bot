@@ -28,7 +28,9 @@ logger = logging.getLogger(__name__)
 # Joke scheduler control - using a file to persist the next joke time
 JOKE_STATE_FILE = "joke_state.json"
 LAST_JOKE_SEND_TIME = None
+NEXT_JOKE_TIME = None  # New variable to track next scheduled time
 JOKE_MUTEX = threading.Lock()
+ACTIVE_JOKE_SCHEDULER = None  # Track the current active scheduler
 
 # Channel welcome message
 CHANNEL_INFO = """
@@ -1052,14 +1054,26 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def send_random_joke(context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a random BGMI joke to the channel."""
-    global LAST_JOKE_SEND_TIME
+    global LAST_JOKE_SEND_TIME, NEXT_JOKE_TIME, ACTIVE_JOKE_SCHEDULER
     
     # Use a mutex to ensure only one instance can execute this at a time
     with JOKE_MUTEX:
-        # Check if we sent a joke recently (within the last 30 minutes)
+        # Check if we sent a joke recently (within the last hour)
         current_time = datetime.now()
-        if LAST_JOKE_SEND_TIME and (current_time - LAST_JOKE_SEND_TIME).total_seconds() < 1800:  # 30 minutes
-            logger.warning(f"Skipping joke as one was already sent at {LAST_JOKE_SEND_TIME.strftime('%H:%M:%S')} (less than 30 minutes ago)")
+        
+        # Super strict time checking
+        if LAST_JOKE_SEND_TIME:
+            time_since_last = (current_time - LAST_JOKE_SEND_TIME).total_seconds()
+            if time_since_last < 3600:  # One hour cooldown
+                logger.warning(f"DUPLICATE PREVENTION: Skipping joke as one was already sent {time_since_last/60:.1f} minutes ago")
+                return
+        
+        # Check if this is the active scheduler
+        if ACTIVE_JOKE_SCHEDULER is not None and context.job.id != ACTIVE_JOKE_SCHEDULER:
+            logger.warning(f"DUPLICATE PREVENTION: This is not the active joke scheduler. Skipping.")
+            # Remove this job if it's not the active one
+            if hasattr(context.job, 'remove'):
+                context.job.remove()
             return
             
         try:
@@ -1077,61 +1091,71 @@ async def send_random_joke(context: ContextTypes.DEFAULT_TYPE) -> None:
                 parse_mode='Markdown'
             )
             
-            # Update last joke time
+            # Update tracking variables
             LAST_JOKE_SEND_TIME = current_time
+            NEXT_JOKE_TIME = current_time + timedelta(hours=5)
             
             # Save to state file for persistence across restarts
             try:
                 with open(JOKE_STATE_FILE, "w") as f:
                     json.dump({
                         "last_joke_time": current_time.isoformat(),
-                        "next_joke_time": (current_time + timedelta(hours=5)).isoformat()
+                        "next_joke_time": NEXT_JOKE_TIME.isoformat()
                     }, f)
             except Exception as e:
                 logger.error(f"Failed to save joke state: {str(e)}")
             
             logger.info(f"Joke sent successfully at {current_time.strftime('%d-%b %H:%M:%S')}. Next joke will be in 5 hours.")
             
-            # Cancel ALL existing joke jobs
+            # COMPLETELY reset the job system for jokes
             if hasattr(context, 'job_queue'):
-                # Remove current and any other joke jobs first
+                # Remove ALL existing joke jobs
                 for job in context.job_queue.jobs():
-                    if job.name.startswith('joke_scheduler'):
+                    if job.name and 'joke' in job.name.lower():
                         job.schedule_removal()
-                        logger.info(f"Removed job: {job.name}")
+                        logger.info(f"Removed job: {job.name} (ID: {job.id})")
                 
-                # Schedule the next joke exactly 5 hours from now
-                next_time = current_time + timedelta(hours=5)
+                # Schedule the next joke exactly 5 hours from now - with a unique, trackable ID
                 next_job = context.job_queue.run_once(
                     send_random_joke,
-                    when=next_time - current_time,  # delta time from now
+                    when=timedelta(hours=5),
                     data=chat_id,
-                    name=f'joke_scheduler_next'
+                    name=f'joke_scheduler_{current_time.strftime("%Y%m%d%H%M%S")}'
                 )
                 
-                logger.info(f"Scheduled next joke for {next_time.strftime('%Y-%m-%d %H:%M:%S')}")
+                # Update the active scheduler ID
+                ACTIVE_JOKE_SCHEDULER = next_job.id
+                
+                logger.info(f"Scheduled next joke for {NEXT_JOKE_TIME.strftime('%Y-%m-%d %H:%M:%S')} with job ID: {ACTIVE_JOKE_SCHEDULER}")
             
         except Exception as e:
             logger.error(f"Error sending joke: {str(e)}")
 
 def load_joke_state():
     """Load joke state from file or create a new one."""
-    global LAST_JOKE_SEND_TIME
+    global LAST_JOKE_SEND_TIME, NEXT_JOKE_TIME
     
     try:
         if os.path.exists(JOKE_STATE_FILE):
             with open(JOKE_STATE_FILE, "r") as f:
                 state = json.load(f)
                 last_time_str = state.get("last_joke_time")
+                next_time_str = state.get("next_joke_time")
+                
                 if last_time_str:
                     LAST_JOKE_SEND_TIME = datetime.fromisoformat(last_time_str)
                     logger.info(f"Loaded last joke time: {LAST_JOKE_SEND_TIME.strftime('%Y-%m-%d %H:%M:%S')}")
-                    return state.get("next_joke_time")
+                
+                if next_time_str:
+                    NEXT_JOKE_TIME = datetime.fromisoformat(next_time_str)
+                    logger.info(f"Loaded next joke time: {NEXT_JOKE_TIME.strftime('%Y-%m-%d %H:%M:%S')}")
+                    return NEXT_JOKE_TIME
     except Exception as e:
         logger.error(f"Failed to load joke state: {str(e)}")
     
-    # Default to no last joke time
+    # Default to no last/next joke times
     LAST_JOKE_SEND_TIME = None
+    NEXT_JOKE_TIME = None
     return None
 
 def get_welcome_by_gender(name, username):
@@ -1371,61 +1395,64 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("Added message handlers")
 
-    # Load joke state and schedule next joke
-    next_joke_time_str = load_joke_state()
+    # Load joke state 
+    next_joke_time = load_joke_state()
     
-    # Cancel any existing joke jobs first
+    # Cancel ALL existing joke jobs
     for job in application.job_queue.jobs():
-        if hasattr(job, 'name') and job.name.startswith('joke_scheduler'):
+        if job.name and 'joke' in job.name.lower():
             job.schedule_removal()
-            logger.info(f"Removed existing joke job: {job.name}")
+            logger.info(f"Startup: Removed existing joke job: {job.name}")
     
-    # Schedule the next joke
-    if next_joke_time_str:
-        try:
-            # Parse the next joke time
-            next_joke_time = datetime.fromisoformat(next_joke_time_str)
-            
-            # Calculate delay from now
-            now = datetime.now()
-            if next_joke_time > now:
-                delay = (next_joke_time - now).total_seconds()
-                logger.info(f"Scheduling next joke based on saved state for {next_joke_time.strftime('%Y-%m-%d %H:%M:%S')} (in {delay/60:.1f} minutes)")
-                
-                # Schedule based on saved state
-                application.job_queue.run_once(
-                    send_random_joke,
-                    when=delay,
-                    data=chat_id,
-                    name='joke_scheduler_next'
-                )
-            else:
-                # Next joke time is in the past, schedule a new one soon
-                logger.info("Saved next joke time is in the past, scheduling a new one in 5 minutes")
-                application.job_queue.run_once(
-                    send_random_joke,
-                    when=300,  # 5 minutes
-                    data=chat_id,
-                    name='joke_scheduler_initial'
-                )
-        except Exception as e:
-            logger.error(f"Error scheduling joke from saved state: {str(e)}")
-            # Schedule a new joke in 5 minutes as fallback
-            application.job_queue.run_once(
-                send_random_joke,
-                when=300,  # 5 minutes
-                data=chat_id,
-                name='joke_scheduler_initial'
-            )
-    else:
-        # No saved state, schedule initial joke in 5 minutes
-        logger.info("No saved joke state found, scheduling initial joke in 5 minutes")
-        application.job_queue.run_once(
+    # Schedule the next joke based on state or a default
+    now = datetime.now()
+    
+    # Case 1: We have a saved next joke time that is in the future
+    if next_joke_time and next_joke_time > now:
+        delay = (next_joke_time - now).total_seconds()
+        logger.info(f"Scheduling next joke based on saved state for {next_joke_time.strftime('%Y-%m-%d %H:%M:%S')} (in {delay/60:.1f} minutes)")
+        
+        next_job = application.job_queue.run_once(
             send_random_joke,
-            when=300,  # 5 minutes
+            when=delay,
+            data=chat_id,
+            name='joke_scheduler_from_state'
+        )
+        
+        # Update the active scheduler
+        global ACTIVE_JOKE_SCHEDULER
+        ACTIVE_JOKE_SCHEDULER = next_job.id
+        logger.info(f"Set active job scheduler ID to: {ACTIVE_JOKE_SCHEDULER}")
+    
+    # Case 2: We have no saved state or the saved time is in the past
+    else:
+        # If we have a last joke time, check when it was sent
+        if LAST_JOKE_SEND_TIME:
+            time_since_last = (now - LAST_JOKE_SEND_TIME).total_seconds()
+            
+            # If less than 5 hours since last joke, schedule for the remainder of the 5 hours
+            if time_since_last < 18000:  # 5 hours in seconds
+                delay = 18000 - time_since_last
+                logger.info(f"Last joke was {time_since_last/60:.1f} minutes ago, scheduling next for {delay/60:.1f} minutes from now")
+            else:
+                # If more than 5 hours, schedule in 5 minutes
+                delay = 300  # 5 minutes
+                logger.info(f"Last joke was over 5 hours ago, scheduling next in 5 minutes")
+        else:
+            # No last joke time, schedule in 5 minutes
+            delay = 300  # 5 minutes
+            logger.info(f"No joke state found, scheduling first joke in 5 minutes")
+        
+        next_job = application.job_queue.run_once(
+            send_random_joke,
+            when=delay,
             data=chat_id,
             name='joke_scheduler_initial'
         )
+        
+        # Update the active scheduler
+        ACTIVE_JOKE_SCHEDULER = next_job.id
+        logger.info(f"Set active job scheduler ID to: {ACTIVE_JOKE_SCHEDULER}")
     
     logger.info("Joke scheduler initialized")
 
