@@ -1074,24 +1074,25 @@ async def send_random_joke(context: ContextTypes.DEFAULT_TYPE) -> None:
         
         logger.info(f"Joke sent successfully at {datetime.now().strftime('%d-%b %H:%M')}. Next joke will be in 5 hours.")
         
-        # Schedule next joke exactly 5 hours from now, and cancel current job
-        # This ensures we never get duplicate joke schedules
+        # Cancel ALL existing joke jobs to prevent duplicate sending
         if hasattr(context, 'job_queue'):
-            # Schedule next job in 5 hours
+            # Cancel all existing joke jobs first
+            for job in context.job_queue.jobs():
+                if hasattr(job, 'name') and 'joke' in job.name.lower():
+                    job.schedule_removal()
+                    logger.info(f"Removed existing joke job: {job.name}")
+            
+            # Schedule only one new job in 5 hours
             next_job = context.job_queue.run_once(
                 send_random_joke,
                 when=timedelta(hours=5),
                 data=chat_id,
-                name='joke_scheduler'
+                name=f'joke_scheduler_{datetime.now().strftime("%Y%m%d%H%M%S")}'  # Unique name with timestamp
             )
             
-            # Add to our tracking list
+            # Clear the tracking list and add only this new job
             global SCHEDULED_JOKE_JOBS
-            SCHEDULED_JOKE_JOBS.append(next_job)
-            
-            # Remove current job from scheduler to prevent duplicate runs
-            if hasattr(context.job, 'job') and hasattr(context.job.job, 'schedule_removal'):
-                context.job.job.schedule_removal()
+            SCHEDULED_JOKE_JOBS = [next_job]
             
             logger.info(f"Scheduled next joke for {(datetime.now() + timedelta(hours=5)).strftime('%d-%b %H:%M')}")
         
@@ -1338,18 +1339,22 @@ def main() -> None:
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     logger.info("Added message handlers")
 
-    # First, cancel any existing joke jobs
+    # First, cancel ALL existing joke jobs
     for job in application.job_queue.jobs():
         if hasattr(job, 'name') and 'joke' in job.name.lower():
             job.schedule_removal()
             logger.info(f"Removed existing joke job: {job.name}")
     
-    # Schedule first joke after 5 minutes
+    # Make sure global list is empty
+    global SCHEDULED_JOKE_JOBS
+    SCHEDULED_JOKE_JOBS = []
+    
+    # Schedule first joke after 5 minutes with a unique name
     job = application.job_queue.run_once(
         send_random_joke,
         when=timedelta(minutes=5),
         data=chat_id,
-        name='initial_joke_scheduler'
+        name=f'initial_joke_scheduler_{datetime.now().strftime("%Y%m%d%H%M%S")}'  # Unique name with timestamp
     )
     
     # Add to our tracking list
