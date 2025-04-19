@@ -11,6 +11,7 @@ import pathlib
 import threading
 from threading import Lock
 import asyncio
+from mod_messages import MOD_MESSAGES  # Import the mod messages
 
 # Load environment variables
 load_dotenv()
@@ -737,6 +738,7 @@ Alert Commands
 • /anticheat - Send anti-cheat warning alert
 • /terms - Send mod usage terms & conditions
 • /safe - Send safe to play status
+• /mod [1-20] - Send mod feature message by number
 
 Announcement Commands
 • /schedule - Schedule an announcement (Format: /schedule HH:MM message)
@@ -763,6 +765,7 @@ Alert Commands
 • /anticheat - Send anti-cheat warning alert
 • /terms - Send mod usage terms & conditions
 • /safe - Send safe to play status
+• /mod [1-20] - Send mod feature message by number
 
 Announcement Commands
 • /schedule - Schedule an announcement (Format: /schedule HH:MM message)
@@ -1228,6 +1231,103 @@ async def safe_to_play(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             text=f"❌ Error: {str(e)}"
         )
 
+async def send_mod_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a mod message based on number."""
+    try:
+        # Check permission
+        if not await check_permission(update, context):
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ Sorry, you don't have permission to use this command."
+            )
+            return
+
+        # Get channel ID
+        chat_id = os.getenv('TELEGRAM_CHAT_ID')
+        if not chat_id:
+            logger.error("No channel ID found")
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ Channel ID not configured"
+            )
+            return
+
+        # Check if message number was provided
+        if not context.args:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="""❌ Please provide a message number (1-20).
+Example: `/mod 5` to send message #5
+
+Available messages:
+1: ESP Features 
+2: Aimbot Features
+3: Memory Hacks
+4: Skin Features
+5: X-Ray Vision
+6: Quick-Shoot Features
+7: Anti-Ban Protection
+8: iCloud Mode
+9: Game Enhancements
+10: Team Tracking
+11: Invisibility
+12: Bullet Tracking
+13: Vehicle Mods
+14: Headshot Master
+15: Damage Multiplier
+16: Night Vision
+17: Drone View
+18: Scope Enhancement
+19: Speed Boost
+20: All-in-One Package""",
+                parse_mode='Markdown'
+            )
+            return
+
+        try:
+            # Parse the message number (1-20)
+            message_num = int(context.args[0])
+            
+            # Validate range
+            if message_num < 1 or message_num > 20:
+                await context.bot.send_message(
+                    chat_id=update.effective_chat.id,
+                    text="❌ Please enter a number between 1 and 20."
+                )
+                return
+                
+            # Get message from array (adjusting for 0-based index)
+            message_index = message_num - 1
+            mod_message = MOD_MESSAGES[message_index]
+            
+            # Send the message to the channel
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=mod_message,
+                parse_mode='Markdown'
+            )
+            
+            # Confirmation to the user
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=f"✅ Mod message #{message_num} sent successfully!"
+            )
+            
+            logger.info(f"Mod message #{message_num} sent by @{update.effective_user.username}")
+            
+        except ValueError:
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text="❌ Please enter a valid number."
+            )
+            
+    except Exception as e:
+        logger.error(f"Error in send_mod_message: {str(e)}")
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text=f"❌ Error: {str(e)}"
+        )
+
 def main() -> None:
     """Start the bot."""
     # Get the token and chat ID from environment variables
@@ -1259,6 +1359,7 @@ def main() -> None:
     application.add_handler(CommandHandler("anticheat", anticheat_alert))
     application.add_handler(CommandHandler("terms", terms_and_conditions))
     application.add_handler(CommandHandler("safe", safe_to_play))
+    application.add_handler(CommandHandler("mod", send_mod_message))
     
     # Add scheduling commands
     application.add_handler(CommandHandler("schedule", schedule_announcement))
