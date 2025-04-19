@@ -26,8 +26,6 @@ logger = logging.getLogger(__name__)
 # Don't load NameDataset globally - will load only when needed
 # nd = NameDataset()
 
-# Remove global variables for joke scheduling
-
 # Channel welcome message
 CHANNEL_INFO = """
  *BGMI ELITE MODS का स्वागत है* 🔥
@@ -302,9 +300,6 @@ AUTHORIZED_USERS = set()  # Start with empty set
 
 # Store scheduled announcements
 SCHEDULED_ANNOUNCEMENTS = {}
-
-# Replace all global joke timing variables with just a single instance tracking variable
-ACTIVE_JOKE_INSTANCE = False
 
 async def check_permission(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
     """Check if user has permission to use commands."""
